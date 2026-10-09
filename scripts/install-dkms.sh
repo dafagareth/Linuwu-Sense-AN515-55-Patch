@@ -72,7 +72,7 @@ if [[ -n "$model_path" ]]; then
   done
   kb_base="/sys/module/$MODNAME/drivers/platform:acer-wmi/acer-wmi/four_zoned_kb"
   if [[ -d "$kb_base" ]]; then
-    for z in four_zone_mode per_zone_mode; do
+    for z in four_zone_mode per_zone_mode brightness; do
       entry="f $kb_base/$z 0660 root $MODNAME"
       grep -qxF "$entry" "$conf_file" || echo "$entry" | sudo tee -a "$conf_file" > /dev/null
     done

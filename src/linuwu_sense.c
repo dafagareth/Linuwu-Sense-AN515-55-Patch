@@ -3679,7 +3679,7 @@ static ssize_t predator_backlight_timeout_store(struct device *dev,
     return -EINVAL;
   if ((val != 0) && (val != 1))
     return -EINVAL;
-  pr_info("bascklight_timeout set value: %d\n", val);
+  pr_info("backlight_timeout set value: %d\n", val);
   status = WMI_apgeaction_execute_u64(
       ACER_WMID_SET_FUNCTION, val == 1 ? 0x1E0000088402 : 0x88402, &result);
   if (ACPI_FAILURE(status)) {
@@ -4163,7 +4163,7 @@ static ssize_t per_zoned_rgb_kb_store(struct device *dev,
   int i = 0;
   size_t len;
   char *token;
-  char str_buf[34];
+  char str_buf[48];
   struct per_zone_color colors;
   char *input_ptr = str_buf;
   len = min(count, sizeof(str_buf) - 1);
@@ -4174,17 +4174,35 @@ static ssize_t per_zoned_rgb_kb_store(struct device *dev,
 
   acpi_status status;
 
-  /* zone1,zone2,zone3,zone4 */
+  /* zone1,zone2,zone3,zone4 - accepts 6 hex (RRGGBB) or 8 hex (RRGGBBAA with transparency) */
 
   while ((token = strsep(&input_ptr, ",")) && i < 4) {
-    if (strlen(token) != 6) {
-      pr_err("Invalid rgb length: %s (%lu) (must be 3 bytes)\n", token,
-             strlen(token));
+    size_t token_len = strlen(token);
+    u64 hex_val;
+
+    if (token_len != 6 && token_len != 8) {
+      pr_err("Invalid rgb length: %s (%lu) (must be 6 or 8 hex chars)\n", token,
+             token_len);
       return -EINVAL;
     }
-    if (kstrtoull(token, 16, &((u64 *)&colors)[i])) {
+    if (kstrtoull(token, 16, &hex_val)) {
       pr_err("Invalid hex value: %s\n", token);
       return -EINVAL;
+    }
+
+    if (token_len == 8) {
+      /* RRGGBBAA format: scale R, G, B channels by Alpha (transparency/opacity) */
+      u32 r = (hex_val >> 24) & 0xff;
+      u32 g = (hex_val >> 16) & 0xff;
+      u32 b = (hex_val >> 8) & 0xff;
+      u32 a = hex_val & 0xff;
+
+      r = (r * a) / 255;
+      g = (g * a) / 255;
+      b = (b * a) / 255;
+      ((u64 *)&colors)[i] = ((u64)r << 16) | ((u64)g << 8) | b;
+    } else {
+      ((u64 *)&colors)[i] = hex_val;
     }
     i++;
   }
@@ -4308,13 +4326,60 @@ static int four_zone_kb_state_load(void) {
   return 0;
 }
 
+static ssize_t four_zoned_brightness_show(struct device *dev,
+                                          struct device_attribute *attr,
+                                          char *buf) {
+  struct get_four_zoned_kb_output out;
+  acpi_status status = get_kb_status(&out);
+  if (ACPI_FAILURE(status))
+    return -ENODEV;
+  return sprintf(buf, "%d\n", out.gmOutput[2]);
+}
+
+static ssize_t four_zoned_brightness_store(struct device *dev,
+                                           struct device_attribute *attr,
+                                           const char *buf, size_t count) {
+  int val;
+  acpi_status status;
+
+  if (kstrtoint(buf, 10, &val) || val < 0 || val > 100) {
+    pr_err("Invalid brightness value (must be 0-100).\n");
+    return -EINVAL;
+  }
+
+  if (current_kb_state.per_zone) {
+    struct per_zone_color colors;
+    status = get_per_zone_color(&colors);
+    if (ACPI_FAILURE(status))
+      return -ENODEV;
+    colors.brightness = val;
+    status = set_per_zone_color(&colors);
+  } else {
+    status = set_kb_status(current_kb_state.mode, current_kb_state.speed,
+                           val, current_kb_state.direction,
+                           current_kb_state.red, current_kb_state.green,
+                           current_kb_state.blue);
+  }
+
+  if (ACPI_FAILURE(status)) {
+    pr_err("Error setting keyboard brightness.\n");
+    return -ENODEV;
+  }
+
+  current_kb_state.brightness = val;
+  return count;
+}
+
 /* Four Zoned Keyboard Attributes */
 static struct device_attribute four_zoned_rgb_mode = __ATTR(
     four_zone_mode, 0644, four_zoned_rgb_kb_show, four_zoned_rgb_kb_store);
 static struct device_attribute per_zoned_rgb_mode =
     __ATTR(per_zone_mode, 0644, per_zoned_rgb_kb_show, per_zoned_rgb_kb_store);
+static struct device_attribute four_zoned_brightness_mode = __ATTR(
+    brightness, 0644, four_zoned_brightness_show, four_zoned_brightness_store);
 static struct attribute *four_zoned_kb_attrs[] = {
-    &four_zoned_rgb_mode.attr, &per_zoned_rgb_mode.attr, NULL};
+    &four_zoned_rgb_mode.attr, &per_zoned_rgb_mode.attr,
+    &four_zoned_brightness_mode.attr, NULL};
 
 /* Four Zoned RGB Keyboard */
 static struct attribute_group four_zoned_kb_attr_group = {
