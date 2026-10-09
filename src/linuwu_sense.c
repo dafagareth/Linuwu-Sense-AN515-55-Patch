@@ -4028,7 +4028,13 @@ static ssize_t four_zoned_rgb_kb_store(struct device *dev,
     return -ENODEV;
   }
 
-  /* Set per_zone to 0 */
+  current_kb_state.mode = mode;
+  current_kb_state.speed = speed;
+  current_kb_state.brightness = brightness;
+  current_kb_state.direction = direction;
+  current_kb_state.red = red;
+  current_kb_state.green = green;
+  current_kb_state.blue = blue;
   current_kb_state.per_zone = 0;
 
   return count;
@@ -4129,9 +4135,9 @@ static acpi_status set_per_zone_color(struct per_zone_color *input) {
   }
 
   for (int i = 0; i < 4; i++) {
-    *zones[i] = (cpu_to_be64(*zones[i]) >> 32) | zone_ids[i];
+    u64 zone_payload = (cpu_to_be64(*zones[i]) >> 32) | zone_ids[i];
     status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_RGB_KB_METHODID,
-                                    *zones[i], NULL);
+                                    zone_payload, NULL);
     if (ACPI_FAILURE(status)) {
       pr_err("Error setting KB color (zone %d): %s\n", i + 1,
              acpi_format_exception(status));
@@ -4219,6 +4225,11 @@ static ssize_t per_zoned_rgb_kb_store(struct device *dev,
     pr_err("Error setting RGB KB status.\n");
     return -ENODEV;
   }
+
+  current_kb_state.zones = colors;
+  current_kb_state.brightness = colors.brightness;
+  current_kb_state.per_zone = 1;
+
   return count;
 }
 
@@ -4350,11 +4361,28 @@ static ssize_t four_zoned_brightness_store(struct device *dev,
   if (current_kb_state.per_zone) {
     struct per_zone_color colors;
     status = get_per_zone_color(&colors);
-    if (ACPI_FAILURE(status))
-      return -ENODEV;
+    if (ACPI_FAILURE(status) || (colors.zone1 == 0 && colors.zone2 == 0 &&
+                                 colors.zone3 == 0 && colors.zone4 == 0)) {
+      colors = current_kb_state.zones;
+      if (colors.zone1 == 0 && colors.zone2 == 0 &&
+          colors.zone3 == 0 && colors.zone4 == 0) {
+        colors.zone1 = 0xffffff;
+        colors.zone2 = 0xffffff;
+        colors.zone3 = 0xffffff;
+        colors.zone4 = 0xffffff;
+      }
+    }
     colors.brightness = val;
     status = set_per_zone_color(&colors);
+    if (ACPI_SUCCESS(status))
+      current_kb_state.zones = colors;
   } else {
+    if (current_kb_state.mode == 0 && current_kb_state.red == 0 &&
+        current_kb_state.green == 0 && current_kb_state.blue == 0) {
+      current_kb_state.red = 255;
+      current_kb_state.green = 255;
+      current_kb_state.blue = 255;
+    }
     status = set_kb_status(current_kb_state.mode, current_kb_state.speed,
                            val, current_kb_state.direction,
                            current_kb_state.red, current_kb_state.green,
