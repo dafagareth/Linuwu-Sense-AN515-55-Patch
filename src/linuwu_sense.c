@@ -3906,6 +3906,8 @@ struct kb_state {
 } __packed;
 
 static struct kb_state current_kb_state;
+static bool zones_initialized;
+static bool static_initialized;
 
 /* four zone mode */
 static ssize_t four_zoned_rgb_kb_show(struct device *dev,
@@ -4036,6 +4038,7 @@ static ssize_t four_zoned_rgb_kb_store(struct device *dev,
   current_kb_state.green = green;
   current_kb_state.blue = blue;
   current_kb_state.per_zone = 0;
+  static_initialized = true;
 
   return count;
 }
@@ -4155,10 +4158,7 @@ static ssize_t per_zoned_rgb_kb_show(struct device *dev,
                                      struct device_attribute *attr, char *buf) {
   struct per_zone_color output;
 
-  if (current_kb_state.per_zone && (current_kb_state.zones.zone1 ||
-                                    current_kb_state.zones.zone2 ||
-                                    current_kb_state.zones.zone3 ||
-                                    current_kb_state.zones.zone4)) {
+  if (current_kb_state.per_zone && zones_initialized) {
     output = current_kb_state.zones;
     output.brightness = current_kb_state.brightness;
   } else {
@@ -4236,6 +4236,7 @@ static ssize_t per_zoned_rgb_kb_store(struct device *dev,
   current_kb_state.zones = colors;
   current_kb_state.brightness = colors.brightness;
   current_kb_state.per_zone = 1;
+  zones_initialized = true;
 
   return count;
 }
@@ -4260,17 +4261,16 @@ static int four_zone_kb_state_update(void) {
   current_kb_state.red = out.gmOutput[5];
   current_kb_state.green = out.gmOutput[6];
   current_kb_state.blue = out.gmOutput[7];
+  static_initialized = true;
 
   // Get per-zone color data if not already cached
-  if (!current_kb_state.per_zone || (!current_kb_state.zones.zone1 &&
-                                     !current_kb_state.zones.zone2 &&
-                                     !current_kb_state.zones.zone3 &&
-                                     !current_kb_state.zones.zone4)) {
+  if (!zones_initialized) {
     status = get_per_zone_color(&current_kb_state.zones);
     if (ACPI_FAILURE(status)) {
       pr_err("get_per_zone_color failed!");
       return -1;
     }
+    zones_initialized = true;
   }
   return 0;
 }
@@ -4329,12 +4329,14 @@ static int four_zone_kb_state_load(void) {
   }
 
   if (current_kb_state.per_zone) {
+    zones_initialized = true;
     status = set_per_zone_color(&current_kb_state.zones);
     if (ACPI_FAILURE(status)) {
       pr_err("Error setting RGB KB status.\n");
       return -1;
     }
   } else {
+    static_initialized = true;
     status = set_kb_status(current_kb_state.mode, current_kb_state.speed,
                            current_kb_state.brightness,
                            current_kb_state.direction, current_kb_state.red,
@@ -4372,8 +4374,7 @@ static ssize_t four_zoned_brightness_store(struct device *dev,
 
   if (current_kb_state.per_zone) {
     struct per_zone_color colors = current_kb_state.zones;
-    if (colors.zone1 == 0 && colors.zone2 == 0 &&
-        colors.zone3 == 0 && colors.zone4 == 0) {
+    if (!zones_initialized) {
       status = get_per_zone_color(&colors);
       if (ACPI_FAILURE(status) || (colors.zone1 == 0 && colors.zone2 == 0 &&
                                    colors.zone3 == 0 && colors.zone4 == 0)) {
@@ -4383,17 +4384,20 @@ static ssize_t four_zoned_brightness_store(struct device *dev,
         colors.zone4 = 0xffffff;
       }
       current_kb_state.zones = colors;
+      zones_initialized = true;
     }
     colors.brightness = val;
     status = set_per_zone_color(&colors);
     if (ACPI_SUCCESS(status))
       current_kb_state.zones.brightness = val;
   } else {
-    if (current_kb_state.mode == 0 && current_kb_state.red == 0 &&
-        current_kb_state.green == 0 && current_kb_state.blue == 0) {
+    if (!static_initialized && current_kb_state.mode == 0 &&
+        current_kb_state.red == 0 && current_kb_state.green == 0 &&
+        current_kb_state.blue == 0) {
       current_kb_state.red = 255;
       current_kb_state.green = 255;
       current_kb_state.blue = 255;
+      static_initialized = true;
     }
     status = set_kb_status(current_kb_state.mode, current_kb_state.speed,
                            val, current_kb_state.direction,
@@ -4481,7 +4485,8 @@ static int acer_platform_probe(struct platform_device *device) {
     err = sysfs_create_group(&device->dev.kobj, &four_zoned_kb_attr_group);
     if (err)
       goto error_four_zone;
-    four_zone_kb_state_load();
+    if (four_zone_kb_state_load() != 0)
+      four_zone_kb_state_update();
   }
 
   return 0;

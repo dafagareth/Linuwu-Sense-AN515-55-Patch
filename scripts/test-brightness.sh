@@ -10,16 +10,27 @@ if [[ ! -w "$BRIGHTNESS_PATH" ]]; then
   exit 1
 fi
 
+assert_brightness() {
+  local target="$1"
+  printf '%s\n' "$target" > "$BRIGHTNESS_PATH"
+  local actual
+  actual="$(cat "$BRIGHTNESS_PATH")"
+  if [[ "$actual" != "$target" ]]; then
+    echo "Assertion failed: expected ${target}%, but read ${actual}%" >&2
+    exit 1
+  fi
+  echo "Brightness verified: ${actual}%"
+}
+
 val="${1:-}"
 
 if [[ -n "$val" ]]; then
-  printf '%s\n' "$val" > "$BRIGHTNESS_PATH"
-  echo "Brightness set to: $(cat "$BRIGHTNESS_PATH")%"
+  assert_brightness "$val"
 else
   echo "Testing brightness adjustments (30% -> 70% -> 100%)..."
   for b in 30 70 100; do
-    printf '%s\n' "$b" > "$BRIGHTNESS_PATH"
-    echo "Current brightness: $(cat "$BRIGHTNESS_PATH")%"
+    assert_brightness "$b"
     sleep 1
   done
+  echo "All brightness tests passed successfully."
 fi
