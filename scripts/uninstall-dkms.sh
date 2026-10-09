@@ -30,7 +30,8 @@ echo "==> Removing systemd service file"
 sudo rm -f /etc/systemd/system/linuwu_sense.service
 sudo systemctl daemon-reload
 
-echo "==> Removing boot auto-load and stock-driver blacklist"
+echo "==> Removing boot auto-load, CLI tool, and stock-driver blacklist"
+sudo rm -f /usr/local/bin/nitro
 sudo rm -f /etc/modules-load.d/$MODNAME.conf
 sudo rm -f /etc/modprobe.d/blacklist-acer_wmi.conf
 

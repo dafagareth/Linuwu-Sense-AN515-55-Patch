@@ -50,6 +50,7 @@ uninstall:
 		echo "Group linuwu_sense does not exist."; \
 	fi
 	@sudo rm -f /etc/tmpfiles.d/$(MODNAME).conf
+	@sudo rm -f /usr/local/bin/nitro
 	@sudo rm -f $(MDIR)/$(MODNAME).ko
 	@sudo depmod -a
 	@echo "Uninstalled $(MODNAME) and cleaned up related configuration."
@@ -61,9 +62,12 @@ install: all
 	sudo install -m 644 src/$(MODNAME).ko $(MDIR)
 	sudo depmod -a
 	@echo "$(MODNAME)" | sudo tee /etc/modules-load.d/$(MODNAME).conf > /dev/null
-	sudo modprobe $(MODNAME)
 	@sudo cp linuwu_sense.service /etc/systemd/system/
 	@sudo systemctl daemon-reload
+	@if [ -f bin/nitro ]; then \
+		sudo install -m 755 bin/nitro /usr/local/bin/nitro; \
+	fi
+	sudo modprobe $(MODNAME)
 	@sudo systemctl enable linuwu_sense.service
 	@sudo systemctl start linuwu_sense.service
 	@echo "Setting up group and permissions..."

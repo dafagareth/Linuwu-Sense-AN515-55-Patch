@@ -43,6 +43,11 @@ sudo cp "$ROOT_DIR/linuwu_sense.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable linuwu_sense.service
 
+if [[ -f "$ROOT_DIR/bin/nitro" ]]; then
+  echo "==> Installing nitro CLI control center"
+  sudo install -m 755 "$ROOT_DIR/bin/nitro" /usr/local/bin/nitro
+fi
+
 echo "==> Loading module"
 sudo modprobe "$MODNAME"
 sudo systemctl start linuwu_sense.service 2>/dev/null || true

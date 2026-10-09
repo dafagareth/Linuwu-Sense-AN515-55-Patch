@@ -18,7 +18,10 @@ Tested on:
   - static-mode activation with a 16-byte payload to method `20`, same layout as `facer_rgb.py`
   - dynamic-mode payloads matching the Jafar implementation
   - breathing mode no longer forces `speed=0`
+  - 8-digit RGBA (`RRGGBBAA`) support for per-zone transparency
+  - dedicated `four_zoned_kb/brightness` sysfs node for 0-100% backlight dimming
 - **Fan control**: the fan is driven directly through `fan_speed` — `0,0` for **Auto**, `100,100` for **Max**. No platform power-profile (quiet/balanced/...) exists on this model, and none is needed.
+- **CLI Control Center (`nitro`)**: command-line tool for fans, RGB presets, brightness, and battery threshold control.
 
 ## Install
 
@@ -109,6 +112,35 @@ cat /sys/module/linuwu_sense/srcversion
 #   make: /lib/modules/$(uname -r)/kernel/drivers/platform/x86/linuwu_sense.ko
 modinfo /lib/modules/$(uname -r)/updates/dkms/linuwu_sense.ko 2>/dev/null \
   || modinfo /lib/modules/$(uname -r)/kernel/drivers/platform/x86/linuwu_sense.ko
+```
+
+## CLI Control Center (`nitro`)
+
+A unified helper script `nitro` is installed to `/usr/local/bin/nitro`:
+
+```bash
+# Telemetry
+nitro status
+
+# Fans
+nitro fan auto
+nitro fan max
+nitro fan toggle
+nitro fan set 60 70
+
+# Backlight brightness
+nitro brightness 70
+
+# RGB presets and 4-zone controls
+nitro rgb red
+nitro rgb rainbow
+nitro rgb static ff0000 00ff00 0000ff ffffff 100
+nitro rgb rgba ff0000ff 00ff0040 0000ff80 ffffff20 100
+nitro rgb off
+
+# Battery health threshold
+nitro battery 80
+nitro battery 100
 ```
 
 ## Test the RGB

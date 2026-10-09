@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_SYSFS="/sys/devices/platform/acer-wmi"
+FAN_NODE="$BASE_SYSFS/nitro_sense/fan_speed"
+BATTERY_NODE="$BASE_SYSFS/nitro_sense/battery_limiter"
+RGB_STATIC_NODE="$BASE_SYSFS/four_zoned_kb/per_zone_mode"
+RGB_DYNAMIC_NODE="$BASE_SYSFS/four_zoned_kb/four_zone_mode"
+RGB_BRIGHTNESS_NODE="$BASE_SYSFS/four_zoned_kb/brightness"
+HWMON_DIR="$(ls -d "$BASE_SYSFS"/hwmon/hwmon* 2>/dev/null | head -n 1 || true)"
+
+write_sysfs() {
+    local val="$1"
+    local node="$2"
+
+    if [[ ! -e "$node" ]]; then
+        echo "Error: Node not found ($node)" >&2
+        return 1
+    fi
+
+    if [[ -w "$node" ]]; then
+        echo "$val" > "$node"
+    else
+        echo "$val" | sudo tee "$node" > /dev/null
+    fi
+}
+
+cmd_status() {
+    echo "=== Acer Nitro 5 Telemetry ==="
+    if [[ -n "$HWMON_DIR" && -d "$HWMON_DIR" ]]; then
+        local f1 f2 t1 t2 t3
+        f1=$(cat "$HWMON_DIR/fan1_input" 2>/dev/null || echo "N/A")
+        f2=$(cat "$HWMON_DIR/fan2_input" 2>/dev/null || echo "N/A")
+        t1=$(awk '{printf "%.1f°C", $1/1000}' "$HWMON_DIR/temp1_input" 2>/dev/null || echo "N/A")
+        t2=$(awk '{printf "%.1f°C", $1/1000}' "$HWMON_DIR/temp2_input" 2>/dev/null || echo "N/A")
+        t3=$(awk '{printf "%.1f°C", $1/1000}' "$HWMON_DIR/temp3_input" 2>/dev/null || echo "N/A")
+
+        echo "Fan 1 (CPU):  ${f1} RPM"
+        echo "Fan 2 (GPU):  ${f2} RPM"
+        echo "Temp 1 (CPU): $t1"
+        echo "Temp 2 (GPU): $t2"
+        echo "Temp 3:       $t3"
+    fi
+
+    if [[ -r "$BATTERY_NODE" ]]; then
+        local bat
+        bat=$(cat "$BATTERY_NODE" 2>/dev/null || echo "N/A")
+        echo "Battery Limit: $([[ "$bat" == "1" ]] && echo "Active (80%)" || echo "Full (100%)")"
+    fi
+
+    if [[ -r "$RGB_BRIGHTNESS_NODE" ]]; then
+        local br
+        br=$(cat "$RGB_BRIGHTNESS_NODE" 2>/dev/null || echo "N/A")
+        echo "Backlight:     ${br}%"
+    fi
+}
+
+cmd_fan() {
+    local sub="${1:-}"
+    shift || true
+
+    case "$sub" in
+        auto)
+            echo "Setting fans to AUTO..."
+            write_sysfs "0,0" "$FAN_NODE"
+            echo "Done."
+            ;;
+        max)
+            echo "Setting fans to MAX (100%)..."
+            write_sysfs "100,100" "$FAN_NODE"
+            echo "Done."
+            ;;
+        toggle)
+            local f1=0
+            if [[ -n "$HWMON_DIR" && -r "$HWMON_DIR/fan1_input" ]]; then
+                f1=$(cat "$HWMON_DIR/fan1_input" 2>/dev/null || echo 0)
+            fi
+            if (( f1 > 4500 )); then
+                echo "Switching to AUTO..."
+                write_sysfs "0,0" "$FAN_NODE"
+                command -v notify-send >/dev/null && notify-send -u low "Nitro" "Fans: AUTO" || true
+            else
+                echo "Switching to MAX..."
+                write_sysfs "100,100" "$FAN_NODE"
+                command -v notify-send >/dev/null && notify-send -u normal "Nitro" "Fans: MAX" || true
+            fi
+            ;;
+        set)
+            local cpu="${1:-}"
+            local gpu="${2:-}"
+            if [[ -z "$cpu" || -z "$gpu" ]]; then
+                echo "Usage: nitro fan set <cpu_0-100> <gpu_0-100>" >&2
+                return 1
+            fi
+            echo "Setting fans to CPU=${cpu}%, GPU=${gpu}%..."
+            write_sysfs "$cpu,$gpu" "$FAN_NODE"
+            echo "Done."
+            ;;
+        *)
+            echo "Usage: nitro fan {auto|max|toggle|set <cpu> <gpu>}" >&2
+            return 1
+            ;;
+    esac
+}
+
+cmd_brightness() {
+    local val="${1:-}"
+    if [[ -z "$val" ]]; then
+        if [[ -r "$RGB_BRIGHTNESS_NODE" ]]; then
+            cat "$RGB_BRIGHTNESS_NODE"
+            return 0
+        fi
+        echo "Usage: nitro brightness <0-100>" >&2
+        return 1
+    fi
+
+    if ! [[ "$val" =~ ^[0-9]+$ ]] || (( val < 0 || val > 100 )); then
+        echo "Error: Brightness must be an integer between 0 and 100." >&2
+        return 1
+    fi
+
+    echo "Setting keyboard brightness to ${val}%..."
+    write_sysfs "$val" "$RGB_BRIGHTNESS_NODE"
+    echo "Done."
+}
+
+cmd_rgb() {
+    local sub="${1:-}"
+    shift || true
+
+    case "$sub" in
+        off)
+            echo "Turning off keyboard backlight..."
+            write_sysfs "000000,000000,000000,000000,0" "$RGB_STATIC_NODE"
+            ;;
+        red)
+            write_sysfs "ff0000,ff0000,ff0000,ff0000,100" "$RGB_STATIC_NODE"
+            ;;
+        green)
+            write_sysfs "00ff00,00ff00,00ff00,00ff00,100" "$RGB_STATIC_NODE"
+            ;;
+        blue)
+            write_sysfs "0000ff,0000ff,0000ff,0000ff,100" "$RGB_STATIC_NODE"
+            ;;
+        cyan)
+            write_sysfs "00ffff,00ffff,00ffff,00ffff,100" "$RGB_STATIC_NODE"
+            ;;
+        magenta|purple)
+            write_sysfs "ff00ff,ff00ff,ff00ff,ff00ff,100" "$RGB_STATIC_NODE"
+            ;;
+        white)
+            write_sysfs "ffffff,ffffff,ffffff,ffffff,100" "$RGB_STATIC_NODE"
+            ;;
+        yellow)
+            write_sysfs "ffff00,ffff00,ffff00,ffff00,100" "$RGB_STATIC_NODE"
+            ;;
+        static)
+            local z1="${1:-ff0000}"
+            local z2="${2:-00ff00}"
+            local z3="${3:-0000ff}"
+            local z4="${4:-ffffff}"
+            local br="${5:-100}"
+            echo "Setting 4-zone static: $z1 $z2 $z3 $z4 ($br%)..."
+            write_sysfs "$z1,$z2,$z3,$z4,$br" "$RGB_STATIC_NODE"
+            ;;
+        rgba)
+            local z1="${1:-ff0000ff}"
+            local z2="${2:-00ff00ff}"
+            local z3="${3:-0000ffff}"
+            local z4="${4:-ffffffff}"
+            local br="${5:-100}"
+            echo "Setting 4-zone RGBA (Transparency): $z1 $z2 $z3 $z4 ($br%)..."
+            write_sysfs "$z1,$z2,$z3,$z4,$br" "$RGB_STATIC_NODE"
+            ;;
+        neon|rainbow)
+            echo "Setting dynamic mode: Neon / Rainbow..."
+            write_sysfs "2,5,100,0,0,0,0" "$RGB_DYNAMIC_NODE"
+            ;;
+        wave)
+            echo "Setting dynamic mode: Wave..."
+            write_sysfs "3,5,100,0,0,0,0" "$RGB_DYNAMIC_NODE"
+            ;;
+        breath)
+            local r="${1:-255}"
+            local g="${2:-0}"
+            local b="${3:-255}"
+            echo "Setting dynamic mode: Breathing ($r, $g, $b)..."
+            write_sysfs "1,4,100,0,$r,$g,$b" "$RGB_DYNAMIC_NODE"
+            ;;
+        *)
+            echo "Usage: nitro rgb {red|green|blue|cyan|magenta|white|yellow|rainbow|wave|breath|static|rgba|off}" >&2
+            return 1
+            ;;
+    esac
+    echo "Done."
+}
+
+cmd_battery() {
+    local sub="${1:-}"
+    case "$sub" in
+        on|80)
+            echo "Enabling Battery Limit (80%)..."
+            write_sysfs "1" "$BATTERY_NODE"
+            echo "Done. Charging will stop at 80%."
+            ;;
+        off|100)
+            echo "Disabling Battery Limit (100%)..."
+            write_sysfs "0" "$BATTERY_NODE"
+            echo "Done. Battery will charge to 100%."
+            ;;
+        status|"")
+            local bat
+            bat=$(cat "$BATTERY_NODE" 2>/dev/null || echo "N/A")
+            echo "Battery Limit: $([[ "$bat" == "1" ]] && echo "Active (80%)" || echo "Full (100%)")"
+            ;;
+        *)
+            echo "Usage: nitro battery {on|off|80|100|status}" >&2
+            return 1
+            ;;
+    esac
+}
+
+show_help() {
+    cat << 'EOF'
+Acer Nitro AN515-55 Control Center
+
+Usage:
+  nitro status                     Show fans, temperatures, and battery info
+  nitro fan auto                   Set fans to quiet auto mode
+  nitro fan max                    Set fans to 100% turbo
+  nitro fan toggle                 Toggle between auto and max
+  nitro fan set <cpu> <gpu>        Set manual speed percentages (0-100)
+  nitro brightness <0-100>         Set keyboard backlight brightness
+  nitro rgb <color>                Set RGB preset (red, green, blue, cyan, white, rainbow, wave, off)
+  nitro rgb static <z1..4> [br]    Set 4-zone static colors (RRGGBB hex)
+  nitro rgb rgba <z1..4> [br]      Set 4-zone colors with transparency (RRGGBBAA hex)
+  nitro battery <80|100|on|off>    Toggle 80% charge limiter
+EOF
+}
+
+main() {
+    local cmd="${1:-}"
+    shift || true
+
+    case "$cmd" in
+        status)
+            cmd_status
+            ;;
+        fan|-fan|-f)
+            cmd_fan "$@"
+            ;;
+        brightness|-brightness|-b)
+            cmd_brightness "$@"
+            ;;
+        rgb|-rgb)
+            cmd_rgb "$@"
+            ;;
+        battery|-battery)
+            cmd_battery "$@"
+            ;;
+        auto)
+            cmd_fan auto
+            ;;
+        max)
+            cmd_fan max
+            ;;
+        toggle)
+            cmd_fan toggle
+            ;;
+        help|-h|--help|"")
+            show_help
+            ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            echo "Run 'nitro help' for usage instructions." >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
