@@ -4154,10 +4154,17 @@ static acpi_status set_per_zone_color(struct per_zone_color *input) {
 static ssize_t per_zoned_rgb_kb_show(struct device *dev,
                                      struct device_attribute *attr, char *buf) {
   struct per_zone_color output;
-  acpi_status status;
-  status = get_per_zone_color(&output);
-  if (ACPI_FAILURE(status)) {
-    return -ENODEV;
+
+  if (current_kb_state.per_zone && (current_kb_state.zones.zone1 ||
+                                    current_kb_state.zones.zone2 ||
+                                    current_kb_state.zones.zone3 ||
+                                    current_kb_state.zones.zone4)) {
+    output = current_kb_state.zones;
+    output.brightness = current_kb_state.brightness;
+  } else {
+    acpi_status status = get_per_zone_color(&output);
+    if (ACPI_FAILURE(status))
+      return -ENODEV;
   }
   return sprintf(buf, "%06llx,%06llx,%06llx,%06llx,%d\n", output.zone1,
                  output.zone2, output.zone3, output.zone4, output.brightness);
@@ -4254,11 +4261,16 @@ static int four_zone_kb_state_update(void) {
   current_kb_state.green = out.gmOutput[6];
   current_kb_state.blue = out.gmOutput[7];
 
-  // Get per-zone color data
-  status = get_per_zone_color(&current_kb_state.zones);
-  if (ACPI_FAILURE(status)) {
-    pr_err("get_per_zone_color failed!");
-    return -1;
+  // Get per-zone color data if not already cached
+  if (!current_kb_state.per_zone || (!current_kb_state.zones.zone1 &&
+                                     !current_kb_state.zones.zone2 &&
+                                     !current_kb_state.zones.zone3 &&
+                                     !current_kb_state.zones.zone4)) {
+    status = get_per_zone_color(&current_kb_state.zones);
+    if (ACPI_FAILURE(status)) {
+      pr_err("get_per_zone_color failed!");
+      return -1;
+    }
   }
   return 0;
 }
@@ -4359,23 +4371,23 @@ static ssize_t four_zoned_brightness_store(struct device *dev,
   }
 
   if (current_kb_state.per_zone) {
-    struct per_zone_color colors;
-    status = get_per_zone_color(&colors);
-    if (ACPI_FAILURE(status) || (colors.zone1 == 0 && colors.zone2 == 0 &&
-                                 colors.zone3 == 0 && colors.zone4 == 0)) {
-      colors = current_kb_state.zones;
-      if (colors.zone1 == 0 && colors.zone2 == 0 &&
-          colors.zone3 == 0 && colors.zone4 == 0) {
+    struct per_zone_color colors = current_kb_state.zones;
+    if (colors.zone1 == 0 && colors.zone2 == 0 &&
+        colors.zone3 == 0 && colors.zone4 == 0) {
+      status = get_per_zone_color(&colors);
+      if (ACPI_FAILURE(status) || (colors.zone1 == 0 && colors.zone2 == 0 &&
+                                   colors.zone3 == 0 && colors.zone4 == 0)) {
         colors.zone1 = 0xffffff;
         colors.zone2 = 0xffffff;
         colors.zone3 = 0xffffff;
         colors.zone4 = 0xffffff;
       }
+      current_kb_state.zones = colors;
     }
     colors.brightness = val;
     status = set_per_zone_color(&colors);
     if (ACPI_SUCCESS(status))
-      current_kb_state.zones = colors;
+      current_kb_state.zones.brightness = val;
   } else {
     if (current_kb_state.mode == 0 && current_kb_state.red == 0 &&
         current_kb_state.green == 0 && current_kb_state.blue == 0) {
