@@ -143,7 +143,7 @@ nitro battery 80
 nitro battery 100
 ```
 
-## Test the RGB
+## Test the RGB & Brightness
 
 Static 4-zone colors:
 
@@ -151,7 +151,18 @@ Static 4-zone colors:
 sudo ./scripts/test-rgb-static.sh
 ```
 
-Expected result: zone 1 red, zone 2 green, zone 3 blue, zone 4 white.
+4-zone transparency (RGBA):
+
+```bash
+sudo ./scripts/test-rgb-rgba.sh
+```
+
+Backlight brightness adjustments:
+
+```bash
+sudo ./scripts/test-brightness.sh
+# or with custom value: sudo ./scripts/test-brightness.sh 50
+```
 
 Breathing magenta:
 
