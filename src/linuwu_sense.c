@@ -3656,6 +3656,8 @@ static ssize_t predator_backlight_timeout_show(struct device *dev,
                                                char *buf) {
   acpi_status status;
   u64 result;
+  u8 timeout;
+
   status = WMI_apgeaction_execute_u64(ACER_WMID_GET_FUNCTION, 0x88401, &result);
   if (ACPI_FAILURE(status)) {
     pr_err("Error getting backlight_timeout status: %s\n",
@@ -3663,10 +3665,12 @@ static ssize_t predator_backlight_timeout_show(struct device *dev,
     return -ENODEV;
   }
   pr_info("backlight_timeout get status: %llu\n", result);
-  return sprintf(buf, "%d\n",
-                 result == 0x1E0000080000 ? 1
-                 : result == 0x80000      ? 0
-                                          : -1);
+  timeout = (result >> 40) & 0xff;
+  if (timeout == 0x1E)
+    return sprintf(buf, "1\n");
+  if (timeout == 0 || result == 0x80000)
+    return sprintf(buf, "0\n");
+  return sprintf(buf, "-1\n");
 }
 
 static ssize_t predator_backlight_timeout_store(struct device *dev,

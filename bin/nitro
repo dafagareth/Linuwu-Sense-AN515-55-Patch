@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_SYSFS="/sys/devices/platform/acer-wmi"
 FAN_NODE="$BASE_SYSFS/nitro_sense/fan_speed"
 BATTERY_NODE="$BASE_SYSFS/nitro_sense/battery_limiter"
+TIMEOUT_NODE="$BASE_SYSFS/nitro_sense/backlight_timeout"
 RGB_STATIC_NODE="$BASE_SYSFS/four_zoned_kb/per_zone_mode"
 RGB_DYNAMIC_NODE="$BASE_SYSFS/four_zoned_kb/four_zone_mode"
 RGB_BRIGHTNESS_NODE="$BASE_SYSFS/four_zoned_kb/brightness"
@@ -52,6 +53,16 @@ cmd_status() {
         local br
         br=$(cat "$RGB_BRIGHTNESS_NODE" 2>/dev/null || echo "N/A")
         echo "Backlight:     ${br}%"
+    fi
+
+    if [[ -r "$TIMEOUT_NODE" ]]; then
+        local tm
+        tm=$(cat "$TIMEOUT_NODE" 2>/dev/null || echo "N/A")
+        case "$tm" in
+            1) echo "KB Timeout:    Enabled (30s inactivity)" ;;
+            0) echo "KB Timeout:    Disabled (Always ON)" ;;
+            *) echo "KB Timeout:    Unknown ($tm)" ;;
+        esac
     fi
 }
 
@@ -220,6 +231,37 @@ cmd_battery() {
     esac
 }
 
+cmd_timeout() {
+    local sub="${1:-}"
+    shift || true
+
+    case "$sub" in
+        on|1|30|enable)
+            echo "Enabling keyboard backlight timeout (30s inactivity)..."
+            write_sysfs "1" "$TIMEOUT_NODE"
+            echo "Done. Keyboard backlight will turn off after 30s of inactivity."
+            ;;
+        off|0|disable|never)
+            echo "Disabling keyboard backlight timeout (Always ON)..."
+            write_sysfs "0" "$TIMEOUT_NODE"
+            echo "Done. Keyboard backlight will stay ON indefinitely."
+            ;;
+        status|"")
+            local t
+            t=$(cat "$TIMEOUT_NODE" 2>/dev/null || echo "N/A")
+            case "$t" in
+                1) echo "Keyboard Backlight Timeout: Enabled (Turns off after 30s of inactivity)" ;;
+                0) echo "Keyboard Backlight Timeout: Disabled (Always ON)" ;;
+                *) echo "Keyboard Backlight Timeout: Unknown ($t)" ;;
+            esac
+            ;;
+        *)
+            echo "Usage: nitro timeout {on|off|status}" >&2
+            return 1
+            ;;
+    esac
+}
+
 show_help() {
     cat << 'EOF'
 Acer Nitro AN515-55 Control Center
@@ -231,6 +273,7 @@ Usage:
   nitro fan toggle                 Toggle between auto and max
   nitro fan set <cpu> <gpu>        Set manual speed percentages (0-100)
   nitro brightness <0-100>         Set keyboard backlight brightness
+  nitro timeout <on|off|status>    Toggle 30s backlight inactivity timeout
   nitro rgb <color>                Set RGB preset (red, green, blue, cyan, white, rainbow, wave, off)
   nitro rgb static <z1..4> [br]    Set 4-zone static colors (RRGGBB hex)
   nitro rgb rgba <z1..4> [br]      Set 4-zone colors with transparency (RRGGBBAA hex)
@@ -251,6 +294,9 @@ main() {
             ;;
         brightness|-brightness|-b)
             cmd_brightness "$@"
+            ;;
+        timeout|-timeout|-t)
+            cmd_timeout "$@"
             ;;
         rgb|-rgb)
             cmd_rgb "$@"

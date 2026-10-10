@@ -128,8 +128,10 @@ nitro fan max
 nitro fan toggle
 nitro fan set 60 70
 
-# Backlight brightness
+# Backlight brightness & timeout
 nitro brightness 70
+nitro timeout on     # Auto-turn off after 30s inactivity
+nitro timeout off    # Stay always on
 
 # RGB presets and 4-zone controls
 nitro rgb red
