@@ -9,3 +9,4 @@ modules.order
 .cache.mk
 .*
 !.gitignore
+compile_commands.json
